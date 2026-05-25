@@ -38,7 +38,7 @@ button,input,select,textarea{font-family:inherit;outline:none}.hidden{display:no
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, where, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-const firebaseConfig={apiKey:"YOUR_FIREBASE_API_KEY",authDomain:"YOUR_PROJECT_ID.firebaseapp.com",projectId:"YOUR_PROJECT_ID",storageBucket:"YOUR_PROJECT_ID.appspot.com",messagingSenderId:"YOUR_SENDER_ID",appId:"YOUR_APP_ID"};
+const firebaseConfig={apiKey:"AIzaSyD8ZUkghMcctF1yTIghPD34SHEasgza2ZY",authDomain:"studysoslab.firebaseapp.com",projectId:"studysoslab",storageBucket:"studysoslab.firebasestorage.app",messagingSenderId:"290782006202",appId:"1:290782006202:web:bf140dd581dbd85640ab83"};
 const ADMIN_EMAILS=[];
 const SI={국어:"📕",수학:"📐",영어:"🔤",과학:"🧪",기타:"🧹"};
 const QMETA={q1:{num:"1",title:"먼저 해야 해요",desc:"중요하고 급한 일이에요",cls:"q1"},q2:{num:"2",title:"미리 준비해요",desc:"중요하니 여유 있을 때",cls:"q2"},q3:{num:"3",title:"짧게 끝내요",desc:"급하지만 시간을 많이 쓰지 않아요",cls:"q3"},q4:{num:"4",title:"나중에 해도 돼요",desc:"시간이 남을 때 해도 괜찮아요",cls:"q4"}};
