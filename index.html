@@ -159,8 +159,7 @@ async function callAI(type,payload){
   }catch(e){
     clearTimeout(timer);
     const detail=e.name==="AbortError"?"AI 응답 시간이 너무 오래 걸립니다. Netlify Function 로그와 OPENAI_API_KEY를 확인해 주세요.":e.message;
-    return "AI 연결 오류가 발생했습니다.\n확인할 것: 1) Netlify 환경변수 OPENAI_API_KEY 저장 2) 저장 후 재배포 3) netlify/functions/ai.js 위치 4) Netlify Functions 로그
-세부 오류: "+detail;
+    return "AI 연결 오류가 발생했습니다.\n확인할 것: 1) Netlify 환경변수 OPENAI_API_KEY 저장 2) 저장 후 재배포 3) netlify/functions/ai.js 위치 4) Netlify Functions 로그\n세부 오류: "+detail;
   }
 }
 function demoAiResponse(type,payload){return "데모 모드 응답입니다. Netlify Functions와 OPENAI_API_KEY를 연결하면 실제 AI 피드백이 제공됩니다.";}
