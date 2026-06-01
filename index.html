@@ -133,11 +133,36 @@ function downloadMindMapPng(){
   img.src=url;
 }
 function fileToDataUrl(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});}
+function resizeImageDataUrl(file,maxW=900,maxH=900,quality=.68){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=reject;
+    reader.onload=()=>{
+      const img=new Image();
+      img.onerror=reject;
+      img.onload=()=>{
+        let w=img.width,h=img.height;
+        const ratio=Math.min(maxW/w,maxH/h,1);
+        w=Math.round(w*ratio);h=Math.round(h*ratio);
+        const canvas=document.createElement("canvas");
+        canvas.width=w;canvas.height=h;
+        const ctx=canvas.getContext("2d");
+        ctx.fillStyle="#fff";
+        ctx.fillRect(0,0,w,h);
+        ctx.drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL("image/jpeg",quality));
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 async function handleMindmapImageUpload(e){
   const file=e.target.files&&e.target.files[0];
   if(!file)return;
   if(!file.type.startsWith("image/")){showToast("이미지 파일만 올릴 수 있어요.");return;}
-  uploadedMindmapDataUrl=await fileToDataUrl(file);
+  showToast("이미지를 AI 비교용으로 줄이는 중이에요.");
+  uploadedMindmapDataUrl=await resizeImageDataUrl(file,900,900,.68);
   $("mindmapPreviewImg").src=uploadedMindmapDataUrl;
   $("mindmapImagePreview").style.display="block";
   showToast("마인드맵 사진이 첨부되었어요.");
