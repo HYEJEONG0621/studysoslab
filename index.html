@@ -330,9 +330,7 @@ async function deleteSchedule(id){
   if(!target)return showToast("삭제할 일정을 찾지 못했어요.");
   const sch=schedules.find(x=>x.id===target);
   const hasLinked=!!(sch&&sch.linkedTaskId);
-  const msg=hasLinked?"이 일정을 삭제할까요?
-
-연결된 이번 주/오늘 할 일 목록에서도 함께 삭제됩니다.":"이 일정을 삭제할까요?";
+  const msg=hasLinked?"이 일정을 삭제할까요?\n\n연결된 이번 주/오늘 할 일 목록에서도 함께 삭제됩니다.":"이 일정을 삭제할까요?";
   if(!confirm(msg))return;
   try{
     if(hasLinked)await dataDelete("tasks",sch.linkedTaskId);
@@ -340,9 +338,7 @@ async function deleteSchedule(id){
     schedules=schedules.filter(x=>x.id!==target);
     if(hasLinked)tasks=tasks.filter(x=>x.id!==sch.linkedTaskId);
     resetScheduleModal();closeModal("scheduleModal");refresh();renderPlanMonthOverview();showToast(hasLinked?"일정과 연결된 할 일을 함께 삭제했어요.":"일정을 삭제했어요.");
-  }catch(e){alert("일정 삭제에 실패했습니다. Firestore 규칙 권한을 확인해 주세요.
-
-"+(e.message||e));}
+  }catch(e){alert("일정 삭제에 실패했습니다. Firestore 규칙 권한을 확인해 주세요.\n\n"+(e.message||e));}
 }
 
 async function saveSchedule(){
