@@ -75,8 +75,10 @@ button,input,select,textarea{font-family:inherit;outline:none}.hidden{display:no
 .home-week-day.today{outline:2px solid rgba(111,75,216,.35);background:#f7f2ff}
 .home-week-head{display:flex;justify-content:space-between;align-items:center;font-weight:900;font-size:13px;color:#4a4569;border-bottom:1px dashed var(--line);padding-bottom:5px;margin-bottom:2px}
 .home-week-date{font-size:12px;color:var(--muted);font-weight:800}
-.home-week-task{display:flex;align-items:center;justify-content:space-between;gap:5px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:5px 6px;font-size:12px;font-weight:900;line-height:1.3}
-.home-week-task .task-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.home-week-task{display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:5px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:6px;font-size:12px;font-weight:900;line-height:1.3}
+.home-week-task .task-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.home-week-task .task-actions{margin-left:0;margin-top:2px;display:flex;justify-content:flex-end;gap:4px}
+.home-week-task .mini-action{font-size:11px;padding:3px 6px;border-radius:7px}
 .home-week-empty{color:var(--muted);font-size:12px;text-align:center;margin:auto 0}
 .home-week-more{font-size:12px;color:var(--pd);font-weight:900;text-align:center}
 @media(max-width:900px){.home-week-calendar{grid-template-columns:1fr 1fr}.home-week-day{min-height:96px}}
@@ -391,7 +393,7 @@ async function addTask(){
 }
 function switchPlanTab(t){$("ptWeekly").classList.toggle("active",t==="weekly");$("ptCompare").classList.toggle("active",t==="compare");$("weeklyPlanTab").style.display=t==="weekly"?"block":"none";$("comparePlanTab").style.display=t==="compare"?"block":"none";if(t==="compare"){if(!aiPriorityMap||Object.keys(aiPriorityMap).length===0)aiPriorityMap=buildAiPriorityMap();renderMatrix("myMatrix","my");renderMatrix("aiMatrix","ai");}}
 function toggleSmart(header){const was=header.classList.contains("open");document.querySelectorAll(".smart-header").forEach(x=>{x.classList.remove("open");x.nextElementSibling.classList.remove("open");});if(!was){header.classList.add("open");header.nextElementSibling.classList.add("open");}}
-function initTodayPlan(){const starts=["14:00","14:30","15:10","15:40","16:10"],ends=["14:30","15:10","15:40","16:10","16:35"];todayPlan=tasks.map((t,i)=>({id:t.id,title:t.title,subject:t.subject,start:t.start||starts[i]||"09:00",end:t.end||ends[i]||"09:30",done:t.result==="완료",actualMin:t.actual||0}));}
+function initTodayPlan(){const starts=["16:00","16:30","17:10","17:40","18:10"],ends=["16:30","17:10","17:40","18:10","18:35"];todayPlan=tasks.map((t,i)=>({id:t.id,title:t.title,subject:t.subject,start:t.start||starts[i]||"시간 미정",end:t.end||ends[i]||"시간 미정",done:t.result==="완료",actualMin:t.actual||0}));}
 function renderTodayExec(){const el=$("todayExecList");if(!el)return;if(!todayPlan.length){el.innerHTML='<div class="tiny" style="text-align:center;padding:12px">계획을 추가해 주세요.</div>';return;}el.innerHTML=todayPlan.map(p=>'<div class="exec-row"><input type="checkbox" class="exec-check" data-exec-done="'+escapeHtml(p.id)+'" '+(p.done?"checked":"")+'/><span class="exec-icon">'+(SI[p.subject]||"📌")+'</span><span class="exec-title" style="'+(p.done?"text-decoration:line-through;color:var(--muted)":"")+'">'+escapeHtml(p.title)+'</span><div class="exec-time"><input type="time" value="'+p.start+'" data-exec-time="'+escapeHtml(p.id)+'" data-field="start"/><span style="color:var(--muted);font-size:13px;padding:0 2px">~</span><input type="time" value="'+p.end+'" data-exec-time="'+escapeHtml(p.id)+'" data-field="end"/></div><button class="mini-action" type="button" data-task-edit="'+escapeHtml(p.id)+'">수정</button><button class="exec-del" data-exec-del="'+escapeHtml(p.id)+'" title="삭제">✕</button></div>').join("");}
 async function execDone(id,checked){await dataUpdate("tasks",id,{result:checked?"완료":"대기",updatedAt:demoMode?Date.now():serverTimestamp()});}
 async function todayCheckOnly(id,checked){await dataUpdate("tasks",id,{todayChecked:!!checked,updatedAt:demoMode?Date.now():serverTimestamp()});}
@@ -403,7 +405,7 @@ function startOfWeekDate(base=new Date()){const d=new Date(base);const day=d.get
 function addDateDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
 function safeHomeTime(t,i){
   if(t.start&&/^\d{2}:\d{2}$/.test(t.start))return t.start;
-  const minutes=14*60+i*60;
+  const minutes=16*60+i*60;
   if(minutes>=24*60)return "시간 미정";
   return String(Math.floor(minutes/60)).padStart(2,"0")+":"+String(minutes%60).padStart(2,"0");
 }
