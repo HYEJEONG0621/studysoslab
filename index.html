@@ -269,6 +269,7 @@ let selectedPlanTaskId=null;
 let selectedReflectionTaskId=null;
 let selectedReflectionTendency=null;
 let weeklyPlanOverrides={};
+let aiPlanOpinionRequestedTaskId=null;
 let reversePlanDraftRows=[];
 let reversePlanDraftText="";
 let editingScheduleId=null,selRef=null,dragId=null,recordFilter="today",wrapMode="summary",unsubs=[];
@@ -335,6 +336,7 @@ async function fetchAiCompare(){
   const panel=$("aiPlanOpinionContent"); if(panel)setLoadingEl(panel);
   const selected=getSelectedPlanTask();
   const text=await callAI("priorityCompare",{tasks:tasks.map(t=>({title:t.title,subject:t.subject,importance:t.importance,urgency:t.urgency,due:t.due,minutes:t.minutes})),selectedTask:selected?{title:selected.title,due:selected.due,minutes:selected.minutes,subject:selected.subject}:null});
+  if(selected)aiPlanOpinionRequestedTaskId=selected.id;
   renderMatrix("aiMatrix","ai");
   if(el)el.innerHTML="🤖 "+toHtml(text||"AI가 우선순위와 시간 배치를 검토했습니다.");
   renderAiPlanOpinion(text);
@@ -482,15 +484,32 @@ function dDayText(due){
   const diff=Math.round((d-t)/86400000);
   return diff===0?"D-DAY":(diff>0?"D-"+diff:"D+"+Math.abs(diff));
 }
+function isPlanTaskExpired(t){
+  // 주간/일간 계획 세우기 탭의 "나의 과제"에서는 마감일이 지난 과제를 자동으로 숨깁니다.
+  // 날짜는 로컬 기준 YYYY-MM-DD 문자열로 비교해 시간대 차이로 하루 밀리는 문제를 줄였습니다.
+  const due=dateOnlyValue(t&&t.due);
+  if(!due)return false;
+  return due < ymdFromDate(new Date());
+}
+function getActivePlanTasks(){
+  return tasks.filter(t=>!isPlanTaskExpired(t));
+}
 function getSelectedPlanTask(){
-  if(!tasks.length)return null;
-  if(!selectedPlanTaskId || !tasks.some(t=>t.id===selectedPlanTaskId))selectedPlanTaskId=tasks[0].id;
-  return tasks.find(t=>t.id===selectedPlanTaskId)||tasks[0];
+  const active=getActivePlanTasks();
+  if(!active.length)return null;
+  if(!selectedPlanTaskId || !active.some(t=>t.id===selectedPlanTaskId))selectedPlanTaskId=active[0].id;
+  return active.find(t=>t.id===selectedPlanTaskId)||active[0];
 }
 function buildPlanRows(task){
+  // 학생이 직접 저장한 세부 계획만 불러옵니다.
+  // 과제를 선택했을 때 자동 초안이 바로 채워지면 학생이 스스로 계획하기 전에 답을 본 것처럼 느낄 수 있어 공란으로 시작합니다.
   if(task&&Array.isArray(task.planRows)&&task.planRows.length){
     return task.planRows.map(r=>({date:String(r.date||""),work:String(r.work||""),time:String(r.time||"30분")})).filter(r=>r.work||r.date);
   }
+  return [];
+}
+function suggestPlanRows(task){
+  // AI 의견 보기 또는 역순 계획 도우미를 눌렀을 때만 사용하는 추천 초안입니다.
   const due=task&&task.due?dateFromYmd(task.due):new Date(Date.now()+3*86400000);
   let start=task&&task.start?dateFromYmd(task.start):null;
   if(!start||start>due){start=new Date(due);start.setDate(due.getDate()-3);}
@@ -551,20 +570,29 @@ function bindWeekPlanRowButtons(){
 function renderWeeklyDailyPlanner(){
   const listEl=$("weeklyPlanTaskList"), body=$("weeklyDailyPlannerBody");
   if(!listEl||!body)return;
+  const activeTasks=getActivePlanTasks();
   if(!tasks.length){
     listEl.innerHTML='<div class="tiny" style="text-align:center;padding:14px">등록된 과제가 없어요.</div>';
     body.innerHTML='<div class="notice">먼저 과제 등록 & 우선순위 탭에서 과제를 추가해 주세요.</div>';
     return;
   }
+  if(!activeTasks.length){
+    selectedPlanTaskId=null;
+    listEl.innerHTML='<div class="tiny" style="text-align:center;padding:14px">계획할 과제가 없어요.<br>마감일이 지난 과제는 자동으로 숨겨졌습니다.</div>';
+    body.innerHTML='<div class="notice"><span>⏰</span><div><strong>마감일이 지난 과제는 주간/일간 계획 목록에서 제외됩니다.</strong><br><span class="tiny">새 과제를 등록하거나 마감일을 오늘 이후로 수정하면 다시 목록에 표시됩니다.</span></div></div>';
+    renderAiPlanOpinion();
+    return;
+  }
   const selected=getSelectedPlanTask();
-  const sorted=[...tasks].sort((a,b)=>String(a.due||"9999").localeCompare(String(b.due||"9999")));
-  listEl.innerHTML=sorted.map(t=>'<div class="week-task-card '+(t.id===selected.id?'active':'')+'" data-plan-task="'+escapeHtml(t.id)+'"><div class="left"><span class="tag">'+(SI[t.subject]||"📌")+'</span><strong>'+escapeHtml(t.title||"")+'</strong></div><span class="d-day">'+dDayText(t.due)+'</span></div>').join("");
+  const sorted=[...activeTasks].sort((a,b)=>String(a.due||"9999").localeCompare(String(b.due||"9999")));
+  listEl.innerHTML=sorted.map(t=>'<div class="week-task-card '+(selected&&t.id===selected.id?'active':'')+'" data-plan-task="'+escapeHtml(t.id)+'"><div class="left"><span class="tag">'+(SI[t.subject]||"📌")+'</span><strong>'+escapeHtml(t.title||"")+'</strong></div><span class="d-day">'+dDayText(t.due)+'</span></div>').join("");
   listEl.querySelectorAll('[data-plan-task]').forEach(card=>card.addEventListener('click',()=>{selectedPlanTaskId=card.dataset.planTask;renderWeeklyDailyPlanner();renderAiPlanOpinion();}));
   const rows=weeklyPlanOverrides[selected.id]||buildPlanRows(selected);
   body.innerHTML='<div class="week-detail-head"><div class="week-detail-title"><span class="tag">'+(SI[selected.subject]||"📌")+'</span><h2>'+escapeHtml(selected.title||"과제")+'</h2></div><span class="d-day">'+dDayText(selected.due)+'</span></div>'+
     '<div class="week-form-grid"><div class="field full"><label>목표</label><input class="inp" id="weekGoalInput" value="'+escapeHtml(selected.memo||selected.title||"")+'"></div><div class="field"><label>시작일</label><input class="inp" type="date" id="weekStartInput" value="'+escapeHtml(selected.start||"")+'"></div><div class="field"><label>마감일</label><input class="inp" type="date" id="weekDueInput" value="'+escapeHtml(selected.due||"")+'"></div><div class="field"><label>예상 시간</label><input class="inp" type="number" id="weekMinInput" value="'+(selected.minutes||30)+'" min="5" step="5"></div></div>'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><h3>📅 내가 먼저 세운 주간 계획</h3><button class="btn btn-o" id="addWeekPlanRowBtn" type="button">+ 계획 추가</button></div>'+
     '<div class="week-plan-table" id="weekPlanTable"><div class="week-plan-row head"><span>날짜</span><span>할 일</span><span>예상 시간</span><span>수정/삭제</span></div>'+rows.map((r,i)=>renderWeekPlanRow(r,i)).join('')+'</div>'+
+    (rows.length?'':'<div class="notice" style="margin-top:10px"><span>✍️</span><div><strong>먼저 내가 계획을 직접 세워보세요.</strong><br><span class="tiny">+ 계획 추가를 눌러 날짜, 할 일, 예상 시간을 입력한 뒤 필요할 때만 AI 의견 보기를 눌러 비교할 수 있어요.</span></div></div>')+
     '<div class="notice" style="margin-top:12px"><span>✅</span><div><strong>먼저 내 계획을 세워본 뒤 AI와 비교해 보세요.</strong><br><span class="tiny">AI 의견은 참고용이며, 최종 결정은 내 선택입니다.</span></div></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px"><button class="btn btn-p" id="aiCompareBtnLocal" type="button">🤖 AI 의견 보기</button><button class="btn btn-o" id="saveWeeklyPlanBtn" type="button">계획 저장</button></div>';
   onEl("aiCompareBtnLocal",'click',fetchAiCompare);
@@ -579,7 +607,7 @@ function renderWeeklyDailyPlanner(){
   bindWeekPlanRowButtons();
 }
 function getAiSuggestionRows(selected){
-  const base=weeklyPlanOverrides[selected?.id]||buildPlanRows(selected);
+  const base=(selected&&weeklyPlanOverrides[selected.id]&&weeklyPlanOverrides[selected.id].length)?weeklyPlanOverrides[selected.id]:suggestPlanRows(selected);
   const labels=["핵심 자료 먼저 정리","초안 완성","부족한 부분 보완","최종 점검 및 제출 준비"];
   return base.map((r,i)=>({date:r.date,work:labels[i]||r.work,time:r.time}));
 }
@@ -587,6 +615,10 @@ function renderAiPlanOpinion(text){
   const panel=$("aiPlanOpinionContent"); if(!panel)return;
   const selected=getSelectedPlanTask();
   if(!selected){panel.innerHTML='<div class="notice">과제를 먼저 등록해 주세요.</div>';return;}
+  if(aiPlanOpinionRequestedTaskId!==selected.id && !text){
+    panel.innerHTML='<div class="notice" style="align-items:flex-start"><span>🤖</span><div><strong>아직 AI 의견을 보지 않았어요.</strong><br><span class="tiny">가운데 표에서 먼저 나만의 주간 계획을 세워본 뒤, 필요할 때 <b>AI 의견 보기</b>를 눌러 비교해 보세요.</span></div></div>';
+    return;
+  }
   const myRows=weeklyPlanOverrides[selected.id]||buildPlanRows(selected);
   const aiRows=getAiSuggestionRows(selected);
   const myHtml=myRows.map(r=>'<div class="ai-plan-row"><span>'+escapeHtml(r.date)+'</span><span>'+escapeHtml(r.work)+'</span><span>'+escapeHtml(r.time)+'</span></div>').join('');
@@ -635,7 +667,7 @@ function runReverseCoach(){
   if(!title)return showToast("과제명을 먼저 입력해 주세요.");
   const selected=getSelectedPlanTask();
   const baseTask={...(selected||{}),title:title||selected?.title||"과제",due:due||selected?.due,minutes:selected?.minutes||30};
-  const baseRows=buildPlanRows(baseTask);
+  const baseRows=suggestPlanRows(baseTask);
   const works=makeReverseWorkItems(title);
   const aiRows=baseRows.map((r,i)=>({date:r.date,work:works[Math.min(i,works.length-1)],time:r.time}));
   reversePlanDraftRows=aiRows;
@@ -704,13 +736,108 @@ function updateSmartBadges(){
 function switchPlanTab(t){$("ptWeekly").classList.toggle("active",t==="weekly");$("ptCompare").classList.toggle("active",t==="compare");$("weeklyPlanTab").style.display=t==="weekly"?"block":"none";$("comparePlanTab").style.display=t==="compare"?"block":"none";if(t==="compare"){renderWeeklyDailyPlanner();renderAiPlanOpinion();renderMatrix("myMatrix","my");renderMatrix("aiMatrix","ai");}}
 function toggleSmart(header){const was=header.classList.contains("open");document.querySelectorAll(".smart-header").forEach(x=>{x.classList.remove("open");x.nextElementSibling.classList.remove("open");});if(!was){header.classList.add("open");header.nextElementSibling.classList.add("open");}}
 function isTimeValue(v){return typeof v==="string"&&/^([01]\d|2[0-3]):[0-5]\d$/.test(v);}
-function initTodayPlan(){const starts=["16:00","16:30","17:10","17:40","18:10"],ends=["16:30","17:10","17:40","18:10","18:35"];todayPlan=tasks.map((t,i)=>{const startTime=isTimeValue(t.startTime)?t.startTime:(isTimeValue(t.start)?t.start:(starts[i]||""));const endTime=isTimeValue(t.endTime)?t.endTime:(isTimeValue(t.end)?t.end:(ends[i]||""));return{id:t.id,title:t.title,subject:t.subject,start:startTime,end:endTime,done:t.result==="완료",actualMin:t.actual||0};});}
-function renderTodayExec(){const el=$("todayExecList");if(!el)return;if(!todayPlan.length){el.innerHTML='<div class="tiny" style="text-align:center;padding:12px">계획을 추가해 주세요.</div>';return;}el.innerHTML=todayPlan.map(p=>'<div class="exec-row"><input type="checkbox" class="exec-check" data-exec-done="'+escapeHtml(p.id)+'" '+(p.done?"checked":"")+'/><span class="exec-icon">'+(SI[p.subject]||"📌")+'</span><span class="exec-title" style="'+(p.done?"text-decoration:line-through;color:var(--muted)":"")+'">'+escapeHtml(p.title)+'</span><div class="exec-time"><input type="time" value="'+p.start+'" data-exec-time="'+escapeHtml(p.id)+'" data-field="start"/><span style="color:var(--muted);font-size:12px;padding:0 2px">~</span><input type="time" value="'+p.end+'" data-exec-time="'+escapeHtml(p.id)+'" data-field="end"/></div><button class="exec-del" data-exec-del="'+escapeHtml(p.id)+'" title="삭제">✕</button></div>').join("");}
-function renderTodayExecSummary(){const el=$("todayExecSummary");if(!el)return;const total=todayPlan.length,done=todayPlan.filter(p=>p.done).length;const mins=tasks.reduce((a,t)=>a+(t.minutes||0),0);el.innerHTML="오늘 계획 "+total+"개 · 완료 "+done+"개 · 예상 "+mins+"분";}
+function rowDateToYmd(row,task){
+  const raw=String(row?.date||"").trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return raw;
+  const m=raw.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if(m){
+    const year=String(task?.due||task?.start||todayStr()).slice(0,4)||String(new Date().getFullYear());
+    return year+"-"+String(m[1]).padStart(2,"0")+"-"+String(m[2]).padStart(2,"0");
+  }
+  return "";
+}
+function minutesFromPlanTime(value){
+  const text=String(value||"").trim();
+  if(!text)return 30;
+  const hour=text.match(/([0-9]+(?:\.[0-9]+)?)\s*h/i);
+  if(hour)return Math.max(5,Math.round(parseFloat(hour[1])*60));
+  const min=text.match(/([0-9]+)\s*분/);
+  if(min)return Math.max(5,parseInt(min[1],10));
+  const num=text.match(/^[0-9]+(?:\.[0-9]+)?$/);
+  if(num)return Math.max(5,Math.round(parseFloat(text)));
+  return 30;
+}
+function addMinutesToTime(start,mins){
+  if(!isTimeValue(start))return "";
+  const [h,m]=start.split(":").map(Number);
+  const total=h*60+m+(Number(mins)||0);
+  if(total>=24*60)return "";
+  return String(Math.floor(total/60)).padStart(2,"0")+":"+String(total%60).padStart(2,"0");
+}
+function makePlanRowId(taskId,index){return taskId+"__row__"+index;}
+function parsePlanRowId(id){const parts=String(id||"").split("__row__");return parts.length===2?{taskId:parts[0],rowIndex:Number(parts[1])}:null;}
+function getTaskByPlanItemId(id){const parsed=parsePlanRowId(id);return parsed?tasks.find(t=>t.id===parsed.taskId):tasks.find(t=>t.id===id);}
+function initTodayPlan(){
+  const baseStarts=["16:00","16:30","17:10","17:40","18:10","18:35","19:00","19:30","20:00"];
+  const today=todayStr();
+  const items=[];
+  tasks.forEach((t,taskIndex)=>{
+    const rows=Array.isArray(t.planRows)?t.planRows:[];
+    if(rows.length){
+      rows.forEach((r,rowIndex)=>{
+        if(rowDateToYmd(r,t)!==today)return;
+        const id=makePlanRowId(t.id,rowIndex);
+        const startTime=isTimeValue(r.startTime)?r.startTime:(baseStarts[items.length]||"");
+        const duration=minutesFromPlanTime(r.time);
+        const endTime=isTimeValue(r.endTime)?r.endTime:addMinutesToTime(startTime,duration);
+        const doneMap=t.planRowDone||{};
+        const done=!!doneMap[rowIndex]||!!doneMap[id];
+        const work=String(r.work||"").trim();
+        items.push({id,taskId:t.id,rowIndex,title:(t.title||"과제")+(work?" - "+work:""),baseTitle:t.title||"과제",work,subject:t.subject,start:startTime,end:endTime,done,minutes:duration,actualMin:t.actual||0,isPlanRow:true});
+      });
+    }else{
+      const startTime=isTimeValue(t.startTime)?t.startTime:(isTimeValue(t.start)?t.start:(baseStarts[items.length]||""));
+      const duration=Number(t.minutes)||30;
+      const endTime=isTimeValue(t.endTime)?t.endTime:(isTimeValue(t.end)?t.end:addMinutesToTime(startTime,duration));
+      items.push({id:t.id,taskId:t.id,title:t.title,baseTitle:t.title,work:"",subject:t.subject,start:startTime,end:endTime,done:t.result==="완료",minutes:duration,actualMin:t.actual||0,isPlanRow:false});
+    }
+  });
+  todayPlan=items;
+}
+function renderTodayExec(){const el=$("todayExecList");if(!el)return;if(!todayPlan.length){el.innerHTML='<div class="tiny" style="text-align:center;padding:12px">오늘 실행할 계획이 없어요. 계획 탭에서 주간/일간 계획을 세워 주세요.</div>';return;}el.innerHTML=todayPlan.map(p=>'<div class="exec-row"><input type="checkbox" class="exec-check" data-exec-done="'+escapeHtml(p.id)+'" '+(p.done?"checked":"")+'/><span class="exec-icon">'+(SI[p.subject]||"📌")+'</span><span class="exec-title" style="'+(p.done?"text-decoration:line-through;color:var(--muted)":"")+'">'+escapeHtml(p.title)+'</span><div class="exec-time"><input type="time" value="'+escapeHtml(p.start||"")+'" data-exec-time="'+escapeHtml(p.id)+'" data-field="start"/><span style="color:var(--muted);font-size:12px;padding:0 2px">~</span><input type="time" value="'+escapeHtml(p.end||"")+'" data-exec-time="'+escapeHtml(p.id)+'" data-field="end"/></div><button class="exec-del" data-exec-del="'+escapeHtml(p.id)+'" title="삭제">✕</button></div>').join("");}
+function renderTodayExecSummary(){const el=$("todayExecSummary");if(!el)return;const total=todayPlan.length,done=todayPlan.filter(p=>p.done).length;const mins=todayPlan.reduce((a,p)=>a+(p.minutes||0),0);el.innerHTML="오늘 계획 "+total+"개 · 완료 "+done+"개 · 예상 "+mins+"분";}
 function toggleTodayPlan(){const body=$("todayExecBody"),btn=$("todayPlanToggleBtn");if(!body||!btn)return;body.classList.toggle("collapsed");btn.textContent=body.classList.contains("collapsed")?"펼치기 ˅":"접기 ˄";}
-async function execDone(id,checked){await dataUpdate("tasks",id,{result:checked?"완료":"대기",updatedAt:demoMode?Date.now():serverTimestamp()});}
-async function execTime(id,field,value){const patch={updatedAt:demoMode?Date.now():serverTimestamp()};patch[field==="start"?"startTime":"endTime"]=value;await dataUpdate("tasks",id,patch);}
-async function execDel(id){await dataDelete("tasks",id);}
+async function execDone(id,checked){
+  const parsed=parsePlanRowId(id);
+  if(parsed){
+    const t=tasks.find(x=>x.id===parsed.taskId);if(!t)return;
+    const doneMap={...(t.planRowDone||{})};doneMap[parsed.rowIndex]=!!checked;
+    const patch={planRowDone:doneMap,updatedAt:demoMode?Date.now():serverTimestamp()};
+    await dataUpdate("tasks",parsed.taskId,patch);
+    t.planRowDone=doneMap;
+    initTodayPlan();renderTodayExec();renderTodayExecSummary();
+    return;
+  }
+  await dataUpdate("tasks",id,{result:checked?"완료":"대기",updatedAt:demoMode?Date.now():serverTimestamp()});
+}
+async function execTime(id,field,value){
+  const parsed=parsePlanRowId(id);
+  if(parsed){
+    const t=tasks.find(x=>x.id===parsed.taskId);if(!t)return;
+    const rows=Array.isArray(t.planRows)?t.planRows.map(r=>({...r})):[];
+    if(!rows[parsed.rowIndex])return;
+    rows[parsed.rowIndex][field==="start"?"startTime":"endTime"]=value;
+    await dataUpdate("tasks",parsed.taskId,{planRows:rows,updatedAt:demoMode?Date.now():serverTimestamp()});
+    t.planRows=rows;
+    initTodayPlan();renderTodayExecSummary();
+    return;
+  }
+  const patch={updatedAt:demoMode?Date.now():serverTimestamp()};patch[field==="start"?"startTime":"endTime"]=value;await dataUpdate("tasks",id,patch);
+}
+async function execDel(id){
+  const parsed=parsePlanRowId(id);
+  if(parsed){
+    const t=tasks.find(x=>x.id===parsed.taskId);if(!t)return;
+    const rows=Array.isArray(t.planRows)?t.planRows.map(r=>({...r})):[];
+    rows.splice(parsed.rowIndex,1);
+    await dataUpdate("tasks",parsed.taskId,{planRows:rows,updatedAt:demoMode?Date.now():serverTimestamp()});
+    t.planRows=rows;
+    refresh();
+    showToast("오늘의 세부 실행 계획을 삭제했어요.");
+    return;
+  }
+  await dataDelete("tasks",id);
+}
 function renderHomeStats(){const totalPlan=tasks.reduce((a,t)=>a+(t.minutes||0),0),totalActual=tasks.reduce((a,t)=>a+(t.actual||0),0),done=tasks.filter(t=>t.result==="완료").length,total=tasks.length,planPct=totalPlan?Math.min(100,Math.round(totalActual/totalPlan*100)):0,donePct=total?Math.round(done/total*100):0;if($("homeStatPlan")){$("homeStatPlan").textContent=totalPlan?Math.floor(totalPlan/60)+"시간 "+totalPlan%60+"분":"0분";}if($("homeStatPlanGoal"))$("homeStatPlanGoal").textContent="총 "+total+"개 과제 · "+totalPlan+"분";if($("homeStatPlanBar"))$("homeStatPlanBar").style.width=Math.min(100,Math.round(totalPlan/(Math.max(totalPlan,300))*100))+"%";if($("homeStatActual"))$("homeStatActual").textContent=totalActual?Math.floor(totalActual/60)+"시간 "+totalActual%60+"분":"0분";if($("homeStatActualBar"))$("homeStatActualBar").style.width=planPct+"%";if($("homeStatDone"))$("homeStatDone").textContent=done+"/"+total+"개";if($("homeStatDoneBar"))$("homeStatDoneBar").style.width=donePct+"%";if($("homeDashPlanCount"))$("homeDashPlanCount").textContent=String(total);if($("homeDashDoneCount"))$("homeDashDoneCount").textContent=String(done);if($("homeDashActualTime"))$("homeDashActualTime").textContent=totalActual?Math.floor(totalActual/60)+"시간 "+(totalActual%60)+"분":"0분";renderHomeStudyKing();}
 function renderHomeStudyKing(){const el=$("homeStudyKing");if(!el)return;const today=todayStr();const todayTasks=tasks.filter(t=>t.due===today||t.actual>0);const totalActual=todayTasks.reduce((a,t)=>a+(t.actual||0),0);const subjectMap={};todayTasks.forEach(t=>{subjectMap[t.subject||"기타"]=(subjectMap[t.subject||"기타"]||0)+(t.actual||0);});const topSubjects=Object.entries(subjectMap).sort((a,b)=>b[1]-a[1]).slice(0,3);let html='<div class="home-king-row home-king-me"><strong>나 · '+escapeHtml((currentProfile&&currentProfile.name)||"학생")+'</strong><span>'+formatMinutes(totalActual)+'</span></div>';if(topSubjects.length){html+=topSubjects.map(([s,m])=>'<div class="home-king-row"><span>'+(SI[s]||"📌")+' '+escapeHtml(s)+'</span><span>'+formatMinutes(m)+'</span></div>').join("");}else{html+='<div class="home-king-empty">아직 오늘 기록된 공부 시간이 없어요.<br>타이머 마감 후 자동으로 반영됩니다.</div>';}el.innerHTML=html;if($("homeKingHint"))$("homeKingHint").textContent="현재 내 학습 기록 기준입니다. 전체 학생 공부왕은 개인정보 보호를 위해 별도 집계 컬렉션으로 연동하는 방식이 안전합니다.";}
 function formatMinutes(min){min=Math.max(0,Number(min)||0);if(min>=60)return Math.floor(min/60)+"시간 "+(min%60)+"분";return min+"분";}
@@ -738,7 +865,7 @@ function renderHomeWeeklyTable(){
   return html;
 }
 function safeHomeTime(t,i){if(t.start&&/^\d{2}:\d{2}$/.test(t.start))return t.start;const mins=16*60+i*60;if(mins>=24*60)return "시간 미정";return String(Math.floor(mins/60)).padStart(2,"0")+":"+String(mins%60).padStart(2,"0");}
-function renderLists(){const wh=$("weeklyHomeList");if(wh)wh.innerHTML=tasks.length?renderHomeWeeklyTable():'<div class="tiny" style="text-align:center;padding:12px">이번 주 계획을 추가해 주세요.</div>';const th=$("todayHomeList");if(th)th.innerHTML=tasks.map((t,i)=>'<div class="row"><span>'+safeHomeTime(t,i)+' <span class="tag">'+escapeHtml(t.subject)+'</span> '+escapeHtml(t.title)+'</span><input type="checkbox" data-exec-done="'+escapeHtml(t.id)+'" '+(t.result==="완료"?"checked":"")+'/></div>').join("")||'<div class="tiny" style="text-align:center;padding:12px">오늘 할 일이 없어요.</div>';const tt=$("timerTask");if(tt)tt.innerHTML=tasks.map(t=>'<option value="'+escapeHtml(t.id)+'">'+(SI[t.subject]||"")+' '+escapeHtml(t.title)+'</option>').join("");renderTodayExecSummary();}
+function renderLists(){const wh=$("weeklyHomeList");if(wh)wh.innerHTML=tasks.length?renderHomeWeeklyTable():'<div class="tiny" style="text-align:center;padding:12px">이번 주 계획을 추가해 주세요.</div>';const th=$("todayHomeList");if(th)th.innerHTML=todayPlan.map((p,i)=>'<div class="row"><span>'+(p.start||safeHomeTime(p,i))+' <span class="tag">'+escapeHtml(p.subject||"기타")+'</span> '+escapeHtml(p.title||"")+'</span><input type="checkbox" data-home-check="'+escapeHtml(p.id)+'" '+(p.done?"checked":"")+'/></div>').join("")||'<div class="tiny" style="text-align:center;padding:12px">오늘 할 일이 없어요.</div>';const tt=$("timerTask");if(tt){const opts=(todayPlan.length?todayPlan:tasks.map(t=>({id:t.id,title:t.title,subject:t.subject})));tt.innerHTML=opts.map(t=>'<option value="'+escapeHtml(t.id)+'">'+(SI[t.subject]||"")+' '+escapeHtml(t.title)+'</option>').join("");}renderTodayExecSummary();}
 function setRecordFilter(f){recordFilter=f;[["Today","today"],["Week","week"],["All","all"]].forEach(pair=>{const b=$("filter"+pair[0]);if(b){b.className="btn "+(f===pair[1]?"btn-p":"btn-o");b.style.cssText="padding:7px 12px;font-size:12px";}});renderTables();}
 function renderTables(){let ts=[...tasks],today=todayStr(),weekAgo=new Date(Date.now()-7*86400000).toISOString().slice(0,10);if(recordFilter==="today")ts=ts.filter(t=>t.due===today||t.actual>0);if(recordFilter==="week")ts=ts.filter(t=>!t.due||t.due>=weekAgo);$("recordsTable").innerHTML=ts.map(t=>{const cls=t.result==="완료"?"b-done":t.result==="일부 완료"?"b-partial":"b-wait";return '<tr><td>'+(t.due||"-")+'</td><td>'+(SI[t.subject]||"")+' '+escapeHtml(t.title)+'</td><td>'+(t.minutes||0)+'분</td><td>'+(t.actual||0)+'분</td><td><span class="badge '+cls+'">'+(t.result||"대기")+'</span></td></tr>';}).join("");const done=tasks.filter(t=>t.result==="완료").length,totalMin=tasks.reduce((a,t)=>a+(t.actual||0),0),pct=tasks.length?Math.round(done/tasks.length*100):0;$("recTodayTime2").textContent=Math.floor(totalMin/60)+"시간 "+(totalMin%60)+"분";$("recTodayBar2").style.width=Math.min(100,Math.round(totalMin/240*100))+"%";$("recDoneCount").textContent=done+"/"+tasks.length+"개";$("recDoneBar").style.width=pct+"%";}
 function reflectionMoodLabel(i){return RLIST[i]||"기분 선택 안 함";}
@@ -787,7 +914,21 @@ function setCustomTimer(){const v=+$("customMinutes").value||30;TMR.total=v*60;$
 function toggleTimer(){TMR.running=!TMR.running;$("timerStartBtn").textContent=TMR.running?"⏸ 일시정지":"▶ 시작";setTimerFocusMode(TMR.running);if(TMR.running){TMR.iv=setInterval(()=>{if(TMR.sec>0){TMR.sec--;TMR.elapsed++;updateTimerUI();}else{clearInterval(TMR.iv);TMR.running=false;$("timerStartBtn").textContent="▶ 시작";setTimerFocusMode(false);finishTimer();}},1000);}else{clearInterval(TMR.iv);setTimerFocusMode(false);}}
 function resetTimer(){clearInterval(TMR.iv);TMR.sec=TMR.total;TMR.running=false;TMR.elapsed=0;$("timerStartBtn").textContent="▶ 시작";setTimerFocusMode(false);updateTimerUI();}
 function updateTimerUI(){const m=String(Math.floor(TMR.sec/60)).padStart(2,"0"),s=String(TMR.sec%60).padStart(2,"0");$("timerText").textContent=m+":"+s;const pct=Math.round((1-TMR.sec/TMR.total)*100);$("timerPct").textContent=pct+"%";$("timerCircle").style.background="conic-gradient(var(--primary) "+pct+"%,#ded4ff 0)";$("actualMinLabel").textContent=Math.floor(TMR.elapsed/60)+"분";}
-async function finishTimer(){if(TMR.elapsed===0)return showToast("먼저 시작 버튼을 눌러 집중해 보세요.");const em=Math.max(1,Math.round(TMR.elapsed/60)),tid=$("timerTask").value,t=tasks.find(x=>x.id===tid);clearInterval(TMR.iv);TMR.running=false;setTimerFocusMode(false);if(t)await dataUpdate("tasks",tid,{actual:(t.actual||0)+em,result:(t.actual||0)+em>=(t.minutes||0)?"완료":"일부 완료",updatedAt:demoMode?Date.now():serverTimestamp()});showToast("🎉 "+em+"분이 기록에 반영됐어요.");TMR.sec=TMR.total;TMR.elapsed=0;updateTimerUI();openModal("finishModal");}
+async function finishTimer(){
+  if(TMR.elapsed===0)return showToast("먼저 시작 버튼을 눌러 집중해 보세요.");
+  const em=Math.max(1,Math.round(TMR.elapsed/60));
+  const planId=$("timerTask").value;
+  const t=getTaskByPlanItemId(planId);
+  clearInterval(TMR.iv);TMR.running=false;setTimerFocusMode(false);
+  if(t){
+    const planned=Number(t.minutes)||30;
+    await dataUpdate("tasks",t.id,{actual:(t.actual||0)+em,result:(t.actual||0)+em>=planned?"완료":"일부 완료",updatedAt:demoMode?Date.now():serverTimestamp()});
+    t.actual=(t.actual||0)+em;
+    t.result=t.actual>=planned?"완료":"일부 완료";
+  }
+  showToast("🎉 "+em+"분이 기록에 반영됐어요.");
+  TMR.sec=TMR.total;TMR.elapsed=0;updateTimerUI();refresh();openModal("finishModal");
+}
 function openWrapUp(mode){wrapMode=mode;const titles={mindmap:"🧩 마인드맵으로 정리하기",summary:"✏️ 3줄 요약하기",quiz:"❓ AI 퀴즈 생성"};$("wrapTitle").textContent=titles[mode];$("wrapResult").innerHTML="";uploadedMindmapDataUrl="";if($("mindmapImageInput"))$("mindmapImageInput").value="";if($("mindmapPreviewImg"))$("mindmapPreviewImg").src="";if($("mindmapImagePreview"))$("mindmapImagePreview").style.display="none";$("mindmapUploadPanel").classList.toggle("hidden",mode!=="mindmap");openModal("wrapModal");}
 
 function openFinishWrap(mode){returnToFinishModalAfterWrap=true;closeModal("finishModal");setTimeout(()=>openWrapUp(mode),80);}window.openFinishWrap=openFinishWrap;window.openWrapUp=openWrapUp;
@@ -813,12 +954,13 @@ function runAppTests(){
   add("계획 탭 존재",()=>has("plan"));
   add("과제 등록 버튼 존재",()=>has("addTaskBtn"));
   add("과제 시작일 입력칸",()=>has("taskStart"));
+  add("주간 계획 실행 탭 연동",()=>typeof rowDateToYmd==="function"&&typeof makePlanRowId==="function");
   add("SMART 입력/체크 영역 존재",()=>document.querySelectorAll(".smart-item").length>0||has("smartFullBtn")||has("smartS"));
   add("월간 일정과 주간 할 일 분리",()=>addTask.toString().indexOf('dataAdd("schedules"')===-1);
   add("일정 수정 버튼 데이터",()=>typeof calendarMarkup==="function"&&calendarMarkup.toString().indexOf("data-sch-edit")>=0);
   add("일정 칩 내부 클릭 안전 처리",()=>bindEvents.toString().indexOf("closest(\"[data-sch-edit]\")")>=0);
   add("일정 삭제 버튼 있음",()=>has("deleteScheduleBtn")&&typeof deleteSchedule==="function");
-  add("주간/일간 계획 화면",()=>typeof renderWeeklyDailyPlanner==="function"&&has("weeklyPlanTaskList"));
+  add("주간/일간 계획 화면",()=>typeof renderWeeklyDailyPlanner==="function"&&has("weeklyPlanTaskList"));add("지난 과제 자동 제외",()=>typeof getActivePlanTasks==="function"&&typeof isPlanTaskExpired==="function");
   add("주간 계획 수정/삭제 버튼",()=>typeof renderWeekPlanRow==="function"&&renderWeekPlanRow({date:"06/09",work:"자료 조사",time:"1.5h"},0).indexOf("data-week-del")>=0);
   add("역순 계획 도우미",()=>has("reverseCoachBtn")||has("reverseCoachBtn2"));
   add("역순 계획 적용/복귀 함수",()=>typeof applyReversePlanSuggestion==="function"&&typeof returnReversePlanSuggestion==="function");
